@@ -328,11 +328,11 @@ def test_batches_run_concurrently_and_export_csv(portals):
     async def go():
         httpx.post(portals["A"] + "/__reset")
         mgr = CrawlManager(timeout=10)
-        b1 = mgr.create_batch([portals["A"] + "/notice/slow/N2026-B1?ms=500",
-                               portals["A"] + "/notice/N2026-B2"])
-        b2 = mgr.create_batch([portals["B"] + "/notice/N2026-C1",
-                               portals["B"] + "/notice/broken/N2026-C2",
-                               "ftp://example.com/x"])
+        b1 = await mgr.create_batch([portals["A"] + "/notice/slow/N2026-B1?ms=500",
+                                     portals["A"] + "/notice/N2026-B2"])
+        b2 = await mgr.create_batch([portals["B"] + "/notice/N2026-C1",
+                                     portals["B"] + "/notice/broken/N2026-C2",
+                                     "ftp://example.com/x"])
         t0 = time.monotonic()
         await asyncio.gather(mgr.run_batch(b1.batch_id),
                              mgr.run_batch(b2.batch_id))

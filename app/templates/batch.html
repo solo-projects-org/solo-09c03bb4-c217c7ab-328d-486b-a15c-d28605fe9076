@@ -13,8 +13,9 @@
   </div>
   <div class="toolbar">
     <a href="/">← 返回</a>
-    <a href="/batches/{{ batch.batch_id }}/csv" id="csv-link">下载 CSV</a>
+    <a href="/batches/{{ batch.batch_id }}/csv" id="csv-link">下载批次 CSV</a>
     <a href="/api/batches/{{ batch.batch_id }}">JSON</a>
+    <a href="/catalog">核定目录</a>
     <span class="hint" id="refresh-note">采集进行中时页面每 2 秒自动刷新。</span>
   </div>
   <p class="hint">同站请求串行：同一 (协议, 主机, 端口) 在途请求最多 1 条，响应体读完后才发下一条；收到 429 后按整数 Retry-After 暂停该站（已排队请求同样等待）。跳转每跳都受目标站限制。</p>

@@ -14,5 +14,6 @@ COPY sources ./sources
 
 EXPOSE 8000
 
-# Single process: batch state is in memory only.
+# Crawl batches stay in memory; the verification catalog is a SQLite database
+# at $CATALOG_DB (default /data/catalog.db) backed by a mounted volume.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

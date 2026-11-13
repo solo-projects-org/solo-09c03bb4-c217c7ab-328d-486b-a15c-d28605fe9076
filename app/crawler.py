@@ -19,7 +19,7 @@ import csv
 import io
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Awaitable, Callable, Dict, List, Optional
 from urllib.parse import urljoin
 
 import httpx
@@ -214,6 +214,9 @@ class Batch:
     items: List[ItemResult] = field(default_factory=list)
     status: str = "pending"  # pending | running | done
     timeout: float = DEFAULT_TIMEOUT
+    # Monotonic submission order, persisted by the catalog store.  Used to
+    # decide which batch's result wins per URL: the latest submitted batch.
+    seq: int = 0
 
     def summary(self) -> dict:
         success = sum(1 for i in self.items if i.status == "success")
@@ -246,16 +249,28 @@ class Batch:
 
 
 class CrawlManager:
-    """In-memory batch registry and crawl driver."""
+    """In-memory batch registry and crawl driver.
+
+    ``seq_provider`` returns the next globally monotonic batch sequence
+    (persisted by the catalog store) so "latest submitted batch" still means
+    something after a restart.  ``item_callback`` is awaited once per item
+    that reaches a terminal state; a successful item is handed to the
+    verification catalog there.
+    """
 
     def __init__(self, timeout: float = DEFAULT_TIMEOUT,
-                 max_concurrency: int = 8):
+                 max_concurrency: int = 8,
+                 seq_provider: Optional[Callable[[], Awaitable[int]]] = None,
+                 item_callback: Optional[Callable[[Batch, ItemResult],
+                                                  Awaitable[None]]] = None):
         self.batches: Dict[str, Batch] = {}
         self.gate = OriginGate()
         self.timeout = timeout
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self._client: Optional[httpx.AsyncClient] = None
         self._seq = 0
+        self._seq_provider = seq_provider
+        self._item_callback = item_callback
 
     def _client_for(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -271,16 +286,23 @@ class CrawlManager:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
 
-    def new_batch_id(self) -> str:
+    async def new_batch_id(self) -> str:
         self._seq += 1
         return f"B{self._seq:04d}"
 
-    def create_batch(self, urls: List[str], timeout: Optional[float] = None) -> Batch:
+    async def create_batch(self, urls: List[str],
+                           timeout: Optional[float] = None) -> Batch:
+        batch_id = await self.new_batch_id()
+        if self._seq_provider is not None:
+            seq = await self._seq_provider()
+        else:
+            seq = self._seq
         batch = Batch(
-            batch_id=self.new_batch_id(),
+            batch_id=batch_id,
             created_at=time.time(),
             urls=list(urls),
             timeout=self.timeout if timeout is None else timeout,
+            seq=seq,
         )
         batch.items = [ItemResult(url=u) for u in urls]
         self.batches[batch.batch_id] = batch
@@ -295,6 +317,17 @@ class CrawlManager:
             item = await fetch_one(client, self.gate, url, self.semaphore,
                                    timeout=batch.timeout)
             batch.items[idx] = item
+            if self._item_callback is not None:
+                # A catalog failure must never kill the crawl itself; the
+                # store already rolled its transaction back, so no partial
+                # catalog write survives. Log it for the operator.
+                try:
+                    await self._item_callback(batch, item)
+                except Exception:
+                    import logging
+                    logging.getLogger("app.crawler").exception(
+                        "catalog ingest failed for %s (transaction rolled back)",
+                        url)
 
         try:
             await asyncio.gather(*(work(i, u) for i, u in enumerate(batch.urls)))

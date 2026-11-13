@@ -15,10 +15,13 @@ services:
       SAMPLE_BASE_A: "http://source-a:8001"
       SAMPLE_BASE_B: "http://source-b:8002"
       REQUEST_TIMEOUT: "15"
+      # Persistent verification catalog (SQLite) inside the named data volume.
+      CATALOG_DB: "/data/catalog.db"
+    volumes:
+      - catalog-data:/data
     depends_on:
       - source-a
       - source-b
-    # Batch state is in memory only; no volumes, no restart persistence.
 
   source-a:
     build: .
@@ -57,3 +60,6 @@ services:
       PORTAL_NAME: "招标公告源 B"
     ports:
       - "8002:8002"
+
+volumes:
+  catalog-data:

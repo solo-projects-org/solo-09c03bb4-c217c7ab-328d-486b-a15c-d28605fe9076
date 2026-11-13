@@ -1,8 +1,10 @@
 """FastAPI web UI for the announcement collector.
 
-Everything is in-memory: batches vanish when the process exits.  Multiple
-batches can be submitted and run concurrently; they all share the same per-
-origin gates.
+Batches still live in memory and vanish when the process exits, but the
+verification catalog (latest successful result per URL, per-announcement
+state and clerk verifications) is persisted in a SQLite database inside the
+mounted data volume, so it survives restarts.  Multiple batches can be
+submitted and run concurrently; they all share the same per-origin gates.
 """
 
 from __future__ import annotations
@@ -11,14 +13,20 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from typing import List, Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from .crawler import DEFAULT_TIMEOUT, MAX_429_RETRIES, MAX_REDIRECTS, CrawlManager
+from .crawler import DEFAULT_TIMEOUT, MAX_429_RETRIES, MAX_REDIRECTS, CrawlManager, ItemResult
 from .origin_gate import origin_of
+from .store import (
+    InvalidChoiceError,
+    StaleVersionError,
+    UnknownAnnouncementError,
+    CatalogStore,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -34,15 +42,50 @@ SAMPLE_B = os.environ.get("SAMPLE_BASE_B", SOURCE_B_PUBLIC)
 
 MAX_URLS_PER_BATCH = 200
 
-manager = CrawlManager(timeout=float(os.environ.get("REQUEST_TIMEOUT", DEFAULT_TIMEOUT)))
+# SQLite catalog. In the container the compose file points this at the named
+# volume (/data/catalog.db); outside Docker it defaults to a local ./data dir.
+CATALOG_DB = os.environ.get("CATALOG_DB", os.path.join(os.getcwd(), "data",
+                                                        "catalog.db"))
+store = CatalogStore(db_path=CATALOG_DB)
+
+
+async def _on_item_done(batch, item: ItemResult) -> None:
+    """Hand a finished item to the persistent catalog.
+
+    Only successes are ingested: a failed crawl must not remove a value an
+    earlier successful batch already stored.
+    """
+    if item.status != "success" or item.announcement is None:
+        return
+    a = item.announcement
+    await store.ingest_success(
+        batch_id=batch.batch_id,
+        batch_seq=batch.seq,
+        submitted_url=item.url,
+        announcement_id=a.announcement_id,
+        title=a.title,
+        deadline_raw=a.deadline_raw,
+        final_url=item.final_url,
+    )
+
+
+manager = CrawlManager(
+    timeout=float(os.environ.get("REQUEST_TIMEOUT", DEFAULT_TIMEOUT)),
+    seq_provider=store.next_batch_seq,
+    item_callback=_on_item_done,
+)
 # Strong references to background batch tasks (see /collect).
 _tasks: dict[str, asyncio.Task] = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
-    await manager.aclose()
+    store.open()
+    try:
+        yield
+    finally:
+        await manager.aclose()
+        store.close()
 
 
 app = FastAPI(title="招标公告采集", lifespan=lifespan)
@@ -116,6 +159,7 @@ async def index(request: Request, invalid: Optional[str] = None):
         "invalid": invalid or "",
         "limits": {"max_urls": MAX_URLS_PER_BATCH},
         "samples": sample_text(),
+        "verify_samples": verification_sample_text(),
     })
 
 
@@ -160,7 +204,7 @@ async def collect(request: Request,
         msg = "没有识别到有效的 http/https URL"
         if rejected:
             msg += "；无法识别的行：" + "、".join(rejected[:5])
-        return RedirectResponse(f"/?invalid={_quote(msg)}", status_code=303)
+        return RedirectResponse(f"/?invalid={quote(msg)}", status_code=303)
 
     if action == "preview":
         # Return a preview without creating a batch.
@@ -177,10 +221,10 @@ async def collect(request: Request,
                 raise ValueError
         except ValueError:
             return RedirectResponse(
-                "/?invalid=" + _quote("超时必须是 0.1–300 秒之间的数字"),
+                "/?invalid=" + quote("超时必须是 0.1–300 秒之间的数字"),
                 status_code=303)
 
-    batch = manager.create_batch(parsed, timeout=parsed_timeout)
+    batch = await manager.create_batch(parsed, timeout=parsed_timeout)
     # Multiple batches may run at once; the per-origin gates keep each site to
     # one in-flight request regardless of how many batches are active.
     # Keep a strong reference: a bare create_task() may be garbage-collected
@@ -192,11 +236,6 @@ async def collect(request: Request,
 
     _tasks[batch.batch_id].add_done_callback(_forget)
     return RedirectResponse(f"/batches/{batch.batch_id}", status_code=303)
-
-
-def _quote(s: str) -> str:
-    from urllib.parse import quote
-    return quote(s)
 
 
 @app.get("/batches/{batch_id}", response_class=HTMLResponse)
@@ -268,3 +307,84 @@ async def batch_json(batch_id: str):
         raise HTTPException(status_code=404, detail="batch not found")
     return JSONResponse({"summary": batch.summary(),
                          "items": [i.to_row() for i in batch.items]})
+
+
+# ---------------------------------------------------------------------------
+# Verification catalog (核定目录)
+# ---------------------------------------------------------------------------
+
+def verification_sample_text() -> str:
+    """Ready-to-paste list for the two-source conflict/verification demo."""
+    return "\n".join([
+        "# 同一公告编号、两站内容一致：直接可供数",
+        f"{SAMPLE_A}/notice/shared/N2026-501",
+        f"{SAMPLE_B}/notice/shared/N2026-501",
+        "",
+        "# 同一公告编号、两站标题不一致：暂停供数，等待核定",
+        f"{SAMPLE_A}/notice/conflict-title/N2026-510",
+        f"{SAMPLE_B}/notice/conflict-title/N2026-510",
+        "",
+        "# 同一公告编号、截止时间原文不一致：暂停供数，等待核定",
+        f"{SAMPLE_A}/notice/conflict-deadline/N2026-511",
+        f"{SAMPLE_B}/notice/conflict-deadline/N2026-511",
+        "",
+        "# 第二条一致公告：重采不改内容时，已有核定保留",
+        f"{SAMPLE_A}/notice/shared/N2026-502",
+        f"{SAMPLE_B}/notice/shared/N2026-502",
+    ])
+
+
+@app.get("/catalog", response_class=HTMLResponse)
+async def catalog_page(request: Request, error: Optional[str] = None,
+                       done: Optional[str] = None):
+    snap = await store.snapshot()
+    return templates.TemplateResponse(request, "catalog.html", {
+        "snap": snap,
+        "error": error or "",
+        "done": done or "",
+        "db_path": CATALOG_DB,
+        "sample": verification_sample_text(),
+    })
+
+
+@app.get("/api/catalog")
+async def catalog_api():
+    return JSONResponse(await store.snapshot())
+
+
+@app.post("/catalog/{announcement_id}/verify")
+async def catalog_verify(announcement_id: str,
+                         chosen_url: str = Form(...),
+                         version: int = Form(...)):
+    try:
+        result = await store.verify(announcement_id, chosen_url, version)
+    except StaleVersionError as exc:
+        # The page was opened before a later committed crawl; never apply a
+        # verification against a catalog state the clerk did not look at.
+        return RedirectResponse(
+            "/catalog?error=" + quote(f"核定被拒绝：{exc}"), status_code=303)
+    except UnknownAnnouncementError:
+        return RedirectResponse(
+            "/catalog?error=" + quote("核定被拒绝：该公告编号已不在目录中"),
+            status_code=303)
+    except InvalidChoiceError:
+        return RedirectResponse(
+            "/catalog?error=" + quote("核定被拒绝：所选 URL 不是该编号当前来源"),
+            status_code=303)
+    return RedirectResponse(
+        "/catalog?done=" + quote(
+            f"已按来源 {result['chosen_url']} 核定 {announcement_id}"),
+        status_code=303)
+
+
+@app.get("/catalog.csv")
+async def catalog_csv():
+    # One committed snapshot is serialised under the store lock: concurrent
+    # crawls/verifications cannot make a single export mix states.
+    payload = await store.catalog_csv()
+    return Response(
+        content=("﻿" + payload).encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 'attachment; filename="verification_catalog.csv"'},
+    )

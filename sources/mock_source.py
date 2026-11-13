@@ -157,6 +157,12 @@ class Controls:
 controls = Controls()
 limit_hits: Dict[str, int] = {}
 
+# Editable per-portal announcement overrides used by the verification demo.
+# Key: shared announcement code (both portals expose the same code with the
+# same announcement id, so re-crawling either portal lands in the same catalog
+# group).  Value: (title, deadline).
+editable: Dict[str, Tuple[str, str]] = {}
+
 
 def take_limit(code: str, times: int) -> bool:
     """Return True when this hit should be throttled."""
@@ -200,6 +206,15 @@ async def admin():
 <li><a href="/notice/missing-field/N2026-005">缺少投标截止时间</a></li>
 <li><a href="/notice/404/N2026-006">404</a></li>
 </ul>
+<h2>核定目录演练（两站同编号）</h2>
+<ul>
+<li><a href="/notice/shared/N2026-501">一致公告 N2026-501（两站默认同标题同截止）</a></li>
+<li><a href="/notice/conflict-title/N2026-510">标题冲突 N2026-510（同编号、同截止、各站标题不同）</a></li>
+<li><a href="/notice/conflict-deadline/N2026-511">截止时间冲突 N2026-511（同编号、同标题、截止原文不同）</a></li>
+</ul>
+<p class="hint" style="font-size:13px;color:#555">在线修改本端口的共享公告（制造/修复冲突，演示重采后核定失效）：<br>
+<code>GET /__edit?code=N2026-501&amp;title=新标题&amp;deadline=2026-12-20 09:30:00</code>；
+查看当前覆盖：<a href="/__edit">/__edit</a>；<code>POST /__reset</code> 清空覆盖。</p>
 <h2>默认参数</h2>
 <form method="get" action="/__control">
 慢响应毫秒 <input name="slow_ms" value="{controls.slow_ms}" size="6">
@@ -248,6 +263,7 @@ async def reset():
     stats.max_active = 0
     stats.total = 0
     stats.requests.clear()
+    editable.clear()
     return JSONResponse({"reset": True})
 
 
@@ -273,6 +289,66 @@ async def index():
 async def notice_loop():
     """Infinite cross-site loop. The client's 5-hop budget must stop it."""
     return RedirectResponse(f"{PEER_BASE}/notice/loop", status_code=302)
+
+
+# --------------------------------------------------------------------------
+# Verification-catalog demo pages
+#
+# The same *code* on both portals renders the same announcement id, so the
+# catalog groups the two submissions together.  Default content is identical
+# (consistent); portal-specific routes deliberately disagree, and the shared
+# page can be edited at runtime on one portal only to create or repair a
+# conflict without restarting anything.
+# --------------------------------------------------------------------------
+
+SHARED_DEFAULTS: Dict[str, Tuple[str, str]] = {
+    "N2026-501": ("两站一致公告 N2026-501", "2026-12-10 09:30:00"),
+    "N2026-502": ("两站一致公告 N2026-502", "2026-12-11 14:00:00"),
+}
+
+
+def _shared_content(code: str) -> Tuple[str, str]:
+    if code in editable:
+        return editable[code]
+    return SHARED_DEFAULTS.get(
+        code, (f"两站一致公告 {code}", "2026-12-10 09:30:00"))
+
+
+@app.get("/notice/shared/{code}")
+async def notice_shared(code: str):
+    """Same announcement id and identical default text on both portals."""
+    title, deadline = _shared_content(code)
+    return HTMLResponse(notice_page(code, title, deadline))
+
+
+@app.get("/notice/conflict-title/{code}")
+async def notice_conflict_title(code: str):
+    """Same announcement id and deadline, portal-specific title."""
+    return HTMLResponse(notice_page(
+        code, f"{NAME}转载版标题 {code}", "2026-12-12 10:00:00"))
+
+
+@app.get("/notice/conflict-deadline/{code}")
+async def notice_conflict_deadline(code: str):
+    """Same announcement id and title, portal-specific deadline raw text."""
+    deadline = ("2026-12-13 09:30:00" if PORTAL == "A"
+                else "2026年12月13日 上午9时30分")
+    return HTMLResponse(notice_page(
+        code, f"截止时间有出入的公告 {code}", deadline))
+
+
+@app.api_route("/__edit", methods=["GET", "POST"])
+async def edit_notice(code: Optional[str] = None,
+                      title: Optional[str] = None,
+                      deadline: Optional[str] = None):
+    """Read or change this portal's copy of a shared notice."""
+    if code is not None and (title is not None or deadline is not None):
+        old_title, old_deadline = _shared_content(code)
+        editable[code] = (title if title is not None else old_title,
+                          deadline if deadline is not None else old_deadline)
+    current = {c: {"title": t, "deadline": d}
+               for c, (t, d) in editable.items()}
+    return JSONResponse({"portal": PORTAL, "editable": current})
 
 
 @app.get("/notice/{code}")

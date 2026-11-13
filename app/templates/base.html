@@ -38,9 +38,12 @@
   .badge.aborted { background: #fde2e1; color: #8a1f1a; }
   .badge.success { background: #dcf5e3; color: #14622f; }
   .badge.failed { background: #fde2e1; color: #8a1f1a; }
+  .badge.verified { background: #e3dcfa; color: #3c2380; }
   .badge.pending_item { background: #fff3cd; color: #7a5c00; }
   .error { background: #fde2e1; border: 1px solid #f3b3ae; color: #8a1f1a;
            padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; }
+  .ok { background: #dcf5e3; border: 1px solid #9ed8b1; color: #14622f;
+        padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; }
   .reason { color: #8a1f1a; }
   .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
   .stats { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; margin-bottom: 8px; }
@@ -66,11 +69,12 @@
 <header>
   <h1>招标公告采集</h1>
   <a href="/">首页 / 提交批次</a>
-  <span style="font-size:12px;color:#9db4d3">任务只存内存，重启清空</span>
+  <a href="/catalog">核定目录</a>
+  <span style="font-size:12px;color:#9db4d3">批次只存内存；核定目录存数据卷 SQLite，重启保留</span>
 </header>
 <main>
 {% block content %}{% endblock %}
 </main>
-<footer>按固定 HTML 版式提取公告编号、标题、投标截止时间原文 · 每站单条在途请求 · 429 整数秒暂停</footer>
+<footer>按固定 HTML 版式提取公告编号、标题、投标截止时间原文 · 每站单条在途请求 · 429 整数秒暂停 · 核定目录按公告编号汇合、冲突暂停供数</footer>
 </body>
 </html>

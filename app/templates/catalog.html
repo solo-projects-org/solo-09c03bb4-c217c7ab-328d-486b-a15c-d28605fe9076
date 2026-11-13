@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}核定目录{% endblock %}
+{% block content %}
+{% if error %}
+<div class="error"><strong>核定未生效：</strong>{{ error }}</div>
+{% endif %}
+{% if done %}
+<div class="ok"><strong>已核定：</strong>{{ done }}</div>
+{% endif %}
+
+<div class="card">
+  <h2>核定目录
+    <span class="hint" style="font-weight:400">按公告编号汇合各来源“最后成功批次”的标题与截止时间原文</span>
+  </h2>
+  <div class="stats">
+    <span>目录编号 <b>{{ snap.total }}</b></span>
+    <span>可供数（一致 + 已核定） <b>{{ snap.supplyable }}</b></span>
+    <span>暂停供数（冲突） <b>{{ snap.suspended }}</b></span>
+  </div>
+  <div class="toolbar">
+    <a href="/catalog.csv">下载目录 CSV（仅含一致或已核定项，每编号一行）</a>
+    · <a href="/api/catalog">JSON 快照</a>
+    · <label style="font-size:13px"><input type="checkbox" id="auto"> 5 秒自动刷新</label>
+    <span class="hint">数据库：{{ db_path }}（数据卷内 SQLite，重启后保留）</span>
+  </div>
+  <p class="hint">
+    每个提交 URL 只保留<strong>最后提交的成功批次</strong>结果；迟到的旧批次不能覆盖新值，失败采集不会撤掉已有值。
+    来源集合或任一条标题/截止原文变化会撤销原核定并使版本号 +1；原样重采不动版本、保留核定。
+    表单带页面版本号：打开页面后来源若变化，旧页面提交的核定一律拒绝（即使内容后来恢复原样）。
+  </p>
+</div>
+
+<div class="card">
+  <h2>核定演练清单（可复制回首页提交）</h2>
+  <textarea id="sample" rows="6" readonly>{{ sample }}</textarea>
+  <div class="row">
+    <button type="button" class="secondary" onclick="copySample()">复制清单</button>
+    <a href="/">回首页粘贴采集</a>
+    <span class="hint" id="copy-note"></span>
+  </div>
+</div>
+
+{% if not snap.entries %}
+<div class="card"><p class="hint">目录还是空的：先到首页采集成功的公告，成功结果会按公告编号自动汇合到这里。</p></div>
+{% else %}
+{% for e in snap.entries %}
+<div class="card" id="entry-{{ e.announcement_id }}">
+  <h2>
+    <span class="mono">{{ e.announcement_id }}</span>
+    {% if e.state == 'consistent' %}
+      <span class="badge done">来源一致 · 可供数</span>
+    {% elif e.state == 'verified' %}
+      <span class="badge verified">已核定 · 可供数</span>
+    {% else %}
+      <span class="badge failed">来源冲突 · 暂停供数</span>
+    {% endif %}
+    <span class="hint" style="font-weight:400">页面版本 v{{ e.version }} · {{ e.sources|length }} 个来源</span>
+  </h2>
+
+  {% if e.state == 'verified' %}
+  <p class="hint">核定结果（取自
+    <span class="mono">{{ e.verification.chosen_url }}</span>，
+    核定时间 {{ e.verification.created_at | timestamp }}）：</p>
+  <p><strong>标题：</strong>{{ e.verification.chosen_title }}<br>
+     <strong>投标截止时间原文：</strong><span class="mono">{{ e.verification.chosen_deadline }}</span></p>
+  {% elif e.state == 'consistent' %}
+  <p><strong>标题：</strong>{{ e.title }}<br>
+     <strong>投标截止时间原文：</strong><span class="mono">{{ e.deadline_raw }}</span></p>
+  {% endif %}
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:30%">提交 URL（最后成功批次）</th>
+        <th>标题原文</th>
+        <th>投标截止时间原文</th>
+        <th>来源批次</th>
+        <th>核定选择</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in e.sources %}
+      <tr>
+        <td class="mono">{{ s.submitted_url }}{% if s.final_url and s.final_url != s.submitted_url %}<br><span class="hint">→ {{ s.final_url }}</span>{% endif %}</td>
+        <td>{{ s.title }}</td>
+        <td class="mono">{{ s.deadline_raw }}</td>
+        <td class="mono">{{ s.batch_id }}<br><span class="hint">{{ s.fetched_at | timestamp }}</span></td>
+        <td>
+          {% if e.state == 'conflict' %}
+          <form method="post" action="/catalog/{{ e.announcement_id | urlencode }}/verify">
+            <input type="hidden" name="version" value="{{ e.version }}">
+            <button type="submit" name="chosen_url" value="{{ s.submitted_url }}">选此来源核定</button>
+          </form>
+          {% elif e.state == 'verified' and e.verification.chosen_url == s.submitted_url %}
+          <span class="badge verified">核定采用</span>
+          {% else %}
+          <span class="hint">—</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if e.state == 'conflict' %}
+  <p class="reason" style="margin-bottom:0">标题或截止时间原文不一致，该编号已暂停供数，不在目录 CSV 中；请选择一份来源核定后恢复供数。</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+<script>
+function copySample() {
+  const box = document.getElementById('sample');
+  box.select();
+  navigator.clipboard.writeText(box.value).then(
+    () => { document.getElementById('copy-note').textContent = '已复制，去首页粘贴'; },
+    () => { document.execCommand('copy');
+            document.getElementById('copy-note').textContent = '已复制，去首页粘贴'; });
+}
+document.getElementById('auto').addEventListener('change', function () {
+  if (this.checked) {
+    this._timer = setInterval(() => location.reload(), 5000);
+  } else {
+    clearInterval(this._timer);
+  }
+});
+</script>
+{% endblock %}

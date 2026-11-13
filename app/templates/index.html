@@ -20,6 +20,7 @@
       <button type="submit" name="action" value="start">开始采集</button>
       <button type="submit" name="action" value="preview" class="secondary">仅预览 URL</button>
       <button type="button" class="secondary" onclick="fillSample()">填入演练样例</button>
+      <button type="button" class="secondary" onclick="fillVerifySample()">填入核定冲突样例</button>
       <span class="hint" id="paste-summary"></span>
     </div>
   </form>
@@ -27,9 +28,16 @@
 
 <script>
 const SAMPLE = {{ samples | tojson }};
+const VERIFY_SAMPLE = {{ verify_samples | tojson }};
 function fillSample() {
   const box = document.querySelector('textarea[name=urls]');
   box.value = SAMPLE;
+  countPaste();
+  box.focus();
+}
+function fillVerifySample() {
+  const box = document.querySelector('textarea[name=urls]');
+  box.value = VERIFY_SAMPLE;
   countPaste();
   box.focus();
 }
@@ -51,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
     <li><a href="{{ source_a }}/__admin" target="_blank">源 A 控制台</a>（{{ source_a }}）</li>
     <li><a href="{{ source_b }}/__admin" target="_blank">源 B 控制台</a>（{{ source_b }}）</li>
     <li><a href="/api/origins" target="_blank">当前各 origin 调度状态（JSON）</a></li>
+    <li><a href="/catalog">核定目录</a>：同编号多站结果按来源汇合，冲突暂停供数、人工核定，目录 CSV 下载</li>
   </ul>
 </section>
 
