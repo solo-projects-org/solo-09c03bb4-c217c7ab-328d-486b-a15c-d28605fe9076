@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}招标公告采集{% endblock %}</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: #f6f7f9; color: #1d2330; }
+  header { background: #1f3a5f; color: #fff; padding: 14px 24px; display: flex;
+           align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 20px; }
+  header a { color: #cfe2ff; text-decoration: none; font-size: 14px; }
+  main { max-width: 1100px; margin: 24px auto; padding: 0 16px 48px; }
+  .card { background: #fff; border: 1px solid #dde3ec; border-radius: 8px;
+          padding: 18px 22px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  .hint { color: #5b6678; font-size: 13px; line-height: 1.5; }
+  textarea { width: 100%; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+             font-size: 13px; line-height: 1.5; padding: 10px; border-radius: 6px;
+             border: 1px solid #b9c3d3; resize: vertical; }
+  .row { display: flex; align-items: center; gap: 18px; margin-top: 10px; flex-wrap: wrap; }
+  label { font-size: 13px; color: #354257; }
+  input[type=number] { width: 110px; padding: 5px; border: 1px solid #b9c3d3; border-radius: 5px; }
+  button { background: #1f66c9; color: #fff; border: 0; border-radius: 6px;
+           padding: 9px 18px; font-size: 14px; cursor: pointer; }
+  button.secondary { background: #eef2f8; color: #1f3a5f; border: 1px solid #b9c3d3; }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e8edf4; vertical-align: top; }
+  th { background: #f2f5fa; font-weight: 600; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; }
+  .badge.pending { background: #fff3cd; color: #7a5c00; }
+  .badge.running { background: #dbe9ff; color: #174a8b; }
+  .badge.done { background: #dcf5e3; color: #14622f; }
+  .badge.aborted { background: #fde2e1; color: #8a1f1a; }
+  .badge.success { background: #dcf5e3; color: #14622f; }
+  .badge.failed { background: #fde2e1; color: #8a1f1a; }
+  .badge.pending_item { background: #fff3cd; color: #7a5c00; }
+  .error { background: #fde2e1; border: 1px solid #f3b3ae; color: #8a1f1a;
+           padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; }
+  .reason { color: #8a1f1a; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .stats { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; margin-bottom: 8px; }
+  .stats b { font-size: 20px; display: block; }
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+  .toolbar a { color: #1f66c9; }
+  code { background: #f2f5fa; padding: 1px 5px; border-radius: 4px; }
+  footer { text-align: center; color: #8b95a5; font-size: 12px; padding: 20px; }
+  @media (prefers-color-scheme: dark) {
+    body { background:#121722; color:#dbe3ef; }
+    .card { background:#1a2130; border-color:#2b3648; }
+    th { background:#212b3d; }
+    .hint, footer { color:#98a4b8; }
+    textarea, input[type=number] { background:#121a27; color:#dbe3ef; border-color:#3a475d; }
+    button.secondary { background:#212b3d; color:#dbe3ef; border-color:#3a475d; }
+    td, th { border-color:#2b3648; }
+    .error { background:#3a1c1c; border-color:#7d3a36; color:#ffc9c5; }
+    .mono { color:#cfd8e6; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>招标公告采集</h1>
+  <a href="/">首页 / 提交批次</a>
+  <span style="font-size:12px;color:#9db4d3">任务只存内存，重启清空</span>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+<footer>按固定 HTML 版式提取公告编号、标题、投标截止时间原文 · 每站单条在途请求 · 429 整数秒暂停</footer>
+</body>
+</html>

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}招标公告采集{% endblock %}
+{% block content %}
+{% if invalid %}
+<div class="error"><strong>无法提交：</strong>{{ invalid }}</div>
+{% endif %}
+
+<section class="card">
+  <h2>粘贴公告 URL 清单</h2>
+  <p class="hint">每行一个 URL；空行与以 <code>#</code> 开头的行会被忽略。可连续提交多批，批次之间互不阻塞，但所有批次对同一站点共用“每站一条在途请求”限制。</p>
+  <form method="post" action="/collect">
+    <textarea name="urls" rows="10" placeholder="http://127.0.0.1:8001/notice/N2026-001&#10;http://127.0.0.1:8001/notice/slow/N2026-002?ms=3000&#10;http://127.0.0.1:8002/notice/N2026-101"></textarea>
+    <div class="row">
+      <label>单条超时（秒，可选）
+        <input name="timeout" type="number" step="0.1" min="0.1" max="300" placeholder="默认 15">
+      </label>
+      <span class="hint">最多 {{ limits.max_urls }} 条/批。跟随跳转 ≤ {{ max_redirects }} 跳；429 后最多重试 {{ max_retries }} 次。</span>
+    </div>
+    <div class="row">
+      <button type="submit" name="action" value="start">开始采集</button>
+      <button type="submit" name="action" value="preview" class="secondary">仅预览 URL</button>
+      <button type="button" class="secondary" onclick="fillSample()">填入演练样例</button>
+      <span class="hint" id="paste-summary"></span>
+    </div>
+  </form>
+</section>
+
+<script>
+const SAMPLE = {{ samples | tojson }};
+function fillSample() {
+  const box = document.querySelector('textarea[name=urls]');
+  box.value = SAMPLE;
+  countPaste();
+  box.focus();
+}
+function countPaste() {
+  const box = document.querySelector('textarea[name=urls]');
+  const lines = box.value.split('\n').filter(l => l.trim() && !l.trim().startsWith('#'));
+  document.getElementById('paste-summary').textContent = lines.length ? lines.length + ' 行待提交' : '';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const box = document.querySelector('textarea[name=urls]');
+  if (box) { box.addEventListener('input', countPaste); countPaste(); }
+});
+</script>
+
+<section class="card">
+  <h2>本地演练源</h2>
+  <p class="hint">两个站点的公告页使用同一固定版式；每个站点提供慢响应、429、跨站跳转的可操作示例。</p>
+  <ul>
+    <li><a href="{{ source_a }}/__admin" target="_blank">源 A 控制台</a>（{{ source_a }}）</li>
+    <li><a href="{{ source_b }}/__admin" target="_blank">源 B 控制台</a>（{{ source_b }}）</li>
+    <li><a href="/api/origins" target="_blank">当前各 origin 调度状态（JSON）</a></li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>批次</h2>
+  {% if not batches %}
+    <p class="hint">还没有批次，先在上方粘贴 URL 开始采集。</p>
+  {% else %}
+  <table>
+    <thead><tr><th>批次</th><th>状态</th><th>总数</th><th>成功</th><th>失败</th><th>未完成</th><th>提交时间</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for b in batches %}
+      {% set s = b.summary() %}
+      <tr>
+        <td><a href="/batches/{{ b.batch_id }}">{{ b.batch_id }}</a></td>
+        <td><span class="badge {{ b.status }}">{{ {'pending':'排队中','running':'采集中','done':'已完成','aborted':'已中止'}.get(b.status, b.status) }}</span></td>
+        <td>{{ s.total }}</td>
+        <td>{{ s.success }}</td>
+        <td>{{ s.failed }}</td>
+        <td>{{ s.pending }}</td>
+        <td>{{ b.created_at | timestamp }}</td>
+        <td>
+          <a href="/batches/{{ b.batch_id }}">详情</a>
+          {% if b.status in ('done','aborted') %}
+          · <a href="/batches/{{ b.batch_id }}/csv">下载 CSV</a>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}

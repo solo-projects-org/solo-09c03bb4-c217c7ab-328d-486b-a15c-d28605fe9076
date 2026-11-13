@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}批次 {{ batch.batch_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>批次 {{ batch.batch_id }}
+    <span class="badge {{ batch.status }}" id="batch-status">{{ {'pending':'排队中','running':'采集中','done':'已完成','aborted':'已中止'}.get(batch.status, batch.status) }}</span>
+  </h2>
+  <div class="stats">
+    <span>总数 <b>{{ summary.total }}</b></span>
+    <span>成功 <b id="n-success">{{ summary.success }}</b></span>
+    <span>失败 <b id="n-failed">{{ summary.failed }}</b></span>
+    <span>未完成 <b id="n-pending">{{ summary.pending }}</b></span>
+  </div>
+  <div class="toolbar">
+    <a href="/">← 返回</a>
+    <a href="/batches/{{ batch.batch_id }}/csv" id="csv-link">下载 CSV</a>
+    <a href="/api/batches/{{ batch.batch_id }}">JSON</a>
+    <span class="hint" id="refresh-note">采集进行中时页面每 2 秒自动刷新。</span>
+  </div>
+  <p class="hint">同站请求串行：同一 (协议, 主机, 端口) 在途请求最多 1 条，响应体读完后才发下一条；收到 429 后按整数 Retry-After 暂停该站（已排队请求同样等待）。跳转每跳都受目标站限制。</p>
+</div>
+
+<div class="card">
+  <h2>逐条结果</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:26%">公告 URL</th>
+        <th>状态</th>
+        <th>公告编号</th>
+        <th>标题</th>
+        <th>投标截止时间（原文）</th>
+        <th style="width:24%">说明 / 失败原因</th>
+      </tr>
+    </thead>
+    <tbody id="item-rows">
+    {% for item in batch.items %}
+      <tr data-url="{{ item.url }}">
+        <td class="mono">{{ item.url }}{% if item.final_url and item.final_url != item.url %}<br><span class="hint">→ {{ item.final_url }}</span>{% endif %}</td>
+        <td><span class="badge {{ 'success' if item.status=='success' else ('failed' if item.status=='failed' else 'pending_item') }}">
+          {{ {'success':'成功','failed':'失败','pending':'等待中'}.get(item.status, item.status) }}</span></td>
+        <td class="mono">{{ item.announcement.announcement_id if item.announcement else '' }}</td>
+        <td>{{ item.announcement.title if item.announcement else '' }}</td>
+        <td class="mono">{{ item.announcement.deadline_raw if item.announcement else '' }}</td>
+        <td>
+          {% if item.status == 'failed' %}<span class="reason">{{ item.reason }}</span>{% endif %}
+          {% if item.redirect_hops %}<div class="hint">跳转 {{ item.redirect_hops }} 次</div>{% endif %}
+          {% if item.retries_429 %}<div class="hint">429 重试 {{ item.retries_429 }} 次</div>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if summary.pending %}<p class="hint">还有 {{ summary.pending }} 条未完成。</p>{% endif %}
+</div>
+
+{% if origins %}
+<div class="card">
+  <h2>各 origin 调度状态（实时）</h2>
+  <table>
+    <thead><tr><th>origin</th><th>在途请求</th><th>排队</th><th>429 暂停剩余</th></tr></thead>
+    <tbody id="origin-rows">
+    {% for name, st in origins.items() %}
+      <tr data-origin="{{ name }}">
+        <td class="mono">{{ name }}</td>
+        <td>{% if st.in_flight %}<span class="mono">{{ st.in_flight[:90] }}</span>{% else %}—{% endif %}</td>
+        <td>{{ st.queued }}</td>
+        <td>{{ '%.1f' | format(st.pause_remaining) }} s</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<script>
+(function () {
+  const status = {{ batch.status | tojson }};
+  if (status === 'done' || status === 'aborted') return;
+  let timer = setTimeout(function poll() {
+    fetch('/api/batches/{{ batch.batch_id }}', {cache: 'no-store'})
+      .then(r => r.json())
+      .then(data => {
+        const s = data.batch;
+        const labels = {pending:'排队中', running:'采集中', done:'已完成', aborted:'已中止'};
+        const el = document.getElementById('batch-status');
+        el.textContent = labels[s.status] || s.status;
+        el.className = 'badge ' + s.status;
+        document.getElementById('n-success').textContent = s.success;
+        document.getElementById('n-failed').textContent = s.failed;
+        document.getElementById('n-pending').textContent = s.pending;
+        const rows = document.getElementById('item-rows');
+        if (rows) {
+          data.items.forEach(function (item, i) {
+            let row = rows.children[i];
+            if (!row) return;
+            const badge = row.children[1].firstElementChild;
+            const map = {success:['成功','success'], failed:['失败','failed'], pending:['等待中','pending_item']};
+            const m = map[item.status] || [item.status, 'pending_item'];
+            badge.textContent = m[0];
+            badge.className = 'badge ' + m[1];
+            row.children[2].textContent = item.announcement_id || '';
+            row.children[3].textContent = item.title || '';
+            row.children[4].textContent = item.deadline_raw || '';
+            let desc = row.children[5];
+            desc.innerHTML = '';
+            if (item.status === 'failed') {
+              const span = document.createElement('span');
+              span.className = 'reason';
+              span.textContent = item.reason || '未知原因';
+              desc.appendChild(span);
+            }
+            if (item.redirect_hops) {
+              const div = document.createElement('div');
+              div.className = 'hint';
+              div.textContent = '跳转 ' + item.redirect_hops + ' 次';
+              desc.appendChild(div);
+            }
+          });
+        }
+        if (s.status === 'done' || s.status === 'aborted') {
+          document.getElementById('refresh-note').textContent =
+            s.status === 'done' ? '采集完成，可下载 CSV。' : '批次已中止。';
+          return;
+        }
+        timer = setTimeout(poll, 2000);
+      })
+      .catch(() => { timer = setTimeout(poll, 3000); });
+  }, 1500);
+})();
+</script>
+{% endblock %}

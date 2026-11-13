@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}URL 预览{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>URL 预览</h2>
+  <p class="hint">以下 URL 将作为一个批次提交（每批最多 {{ max_urls }} 条）。</p>
+  <form method="post" action="/collect">
+    <input type="hidden" name="urls" value="{{ parsed | join('\n') }}">
+    <div class="row">
+      <button type="submit" name="action" value="start">确认开始采集</button>
+      <a href="/">取消</a>
+    </div>
+  </form>
+  <ul>
+    {% for u in parsed %}<li class="mono">{{ u }}</li>{% endfor %}
+  </ul>
+  {% if rejected %}
+  <h2>被忽略的行（不是合法的 http/https URL）</h2>
+  <ul>{% for r in rejected %}<li class="mono reason">{{ r }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+{% endblock %}

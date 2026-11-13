@@ -1,0 +1,59 @@
+services:
+  collector:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # URLs the collector dials from inside the compose network.
+      SOURCE_A_URL: "http://source-a:8001"
+      SOURCE_B_URL: "http://source-b:8002"
+      # URLs shown as links in the browser (the operator's machine).
+      SOURCE_A_PUBLIC_URL: "http://localhost:8001"
+      SOURCE_B_PUBLIC_URL: "http://localhost:8002"
+      # The one-click sample list is pasted by the operator and reached by
+      # the collector, so it uses the in-network addresses.
+      SAMPLE_BASE_A: "http://source-a:8001"
+      SAMPLE_BASE_B: "http://source-b:8002"
+      REQUEST_TIMEOUT: "15"
+    depends_on:
+      - source-a
+      - source-b
+    # Batch state is in memory only; no volumes, no restart persistence.
+
+  source-a:
+    build: .
+    command:
+      - "python"
+      - "-m"
+      - "uvicorn"
+      - "sources.mock_source:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8001"
+    environment:
+      PORTAL: "A"
+      SELF_BASE: "http://source-a:8001"
+      PEER_BASE: "http://source-b:8002"
+      PORTAL_NAME: "招标公告源 A"
+    ports:
+      - "8001:8001"
+
+  source-b:
+    build: .
+    command:
+      - "python"
+      - "-m"
+      - "uvicorn"
+      - "sources.mock_source:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8002"
+    environment:
+      PORTAL: "B"
+      SELF_BASE: "http://source-b:8002"
+      PEER_BASE: "http://source-a:8001"
+      PORTAL_NAME: "招标公告源 B"
+    ports:
+      - "8002:8002"
